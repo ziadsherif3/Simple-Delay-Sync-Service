@@ -63,12 +63,23 @@ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 broadcaster = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # Setup the UDP socket
 
+'''A function to get random ports for nodes'''
+def get_random_tcp_port():
+    tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp.bind(('', 0))
+    addr, port = tcp.getsockname()
+    tcp.close()
+    return port
+
 
 def send_broadcast_thread():
     node_uuid = get_node_uuid()
+    broadcaster.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT,1) #Bind to same port
+    broadcaster.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1) #Enable Broadcasting
+    broadcast_msg = f"[{node_uuid}] ON [{get_random_tcp_port()}]"
     while True:
-        # TODO: write logic for sending broadcasts.
-        time.sleep(1)   # Leave as is.
+        broadcaster.sendto(broadcast_msg,("255.255.255.255",get_broadcast_port())) #Broadcast the message on global broadcast address
+        time.sleep(1) 
 
 
 def receive_broadcast_thread():
@@ -77,10 +88,14 @@ def receive_broadcast_thread():
     launches a thread to connect to new nodes
     and exchange timestamps.
     """
+    broadcaster.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT,1) #Bind to same port
+    broadcaster.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1) #Enable Broadcasting
+    broadcaster.bind(("", get_broadcast_port()))
     while True:
-        # TODO: write logic for receiving broadcasts.
         data, (ip, port) = broadcaster.recvfrom(4096)
         print_blue(f"RECV: {data} FROM: {ip}:{port}")
+        recv_node_id = data.split()[0][1:-1] #Get node's id,seems unnecessary :D
+        
 
 
 def tcp_server_thread():
@@ -88,14 +103,26 @@ def tcp_server_thread():
     Accept connections from other nodes and send them
     this node's timestamp once they connect.
     """
-    pass
+    server.bind(("0.0.0.0",0)) #Or use ""
+    server.listen(20)
+    while True:
+        nodesocket , addr = server.accept() #Accept connections from other nodes
+        curr_timestamp = time.time() #Node's Timestamp
+        data , addr = server.recvfrom(2048)
+        recv_timestamp = struct.unpack("!f",data) #Receive the Timestamp of other nodes
+        delay = curr_timestamp - recv_timestamp
+
+        #TO BE INSERTED HERE -> Store delay in hashtable
+
+        sent_timestamp = struct.pack("!f",curr_timestamp) #Float Timestamp
+        nodesocket.send(sent_timestamp)
+        nodesocket.close()
 
 
 def exchange_timestamps_thread(other_uuid: str, other_ip: str, other_tcp_port: int):
     """
     Open a connection to the other_ip, other_tcp_port
     and do the steps to exchange timestamps.
-
     Then update the neighbor_info map using other node's UUID.
     """
     print_yellow(f"ATTEMPTING TO CONNECT TO {other_uuid}")
